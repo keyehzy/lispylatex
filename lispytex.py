@@ -15,6 +15,26 @@ class Symbol(str):
     pass
 
 
+class State:
+    def __init__(self):
+        self._bindings = defaultdict(str)
+
+    def set(self, key, value):
+        self._bindings[key] = value
+
+    def get(self, key):
+        return self._bindings[key]
+
+    def bindings(self):
+        return self._bindings.keys()
+
+    def find(self, key):
+        return key in self._bindings.keys()
+
+
+global_state = State()
+
+
 class LispParser:
 
     pointer = 0
@@ -24,7 +44,6 @@ class LispParser:
         self.tokens = re.findall(TK_RE, code)
         self.back = self.tokens[self.pointer]
         self.indentation = indentation
-        self.bindings = defaultdict(str)
 
     def peek(self):
         return self.back
@@ -62,11 +81,14 @@ class LispParser:
     def many_curlies(self, a):
         return f"{{{a}}}"
 
-    def lookup(self, symbol):
-        if symbol in self.bindings.keys():
-            return self.bindings[symbol]
+    def lookup(self, symbol, state):
+        if symbol in global_state.bindings():
+            return global_state.get(symbol)
+        elif symbol in state.bindings():
+            return state.get(symbol)
+
         elif symbol == '+' or symbol == 'plus':
-            return lambda a, b: f"{a} + {b}"
+            return lambda *a: " + ".join([f"{i}" for i in a]).strip()
         elif symbol == '-' or symbol == 'minus':
             return lambda a, b: f"{a} - {b}"
         elif symbol == '*' or symbol == 'times':
@@ -91,51 +113,56 @@ class LispParser:
         else:
             return symbol
 
-    def eval1(self, ast) -> str:
+    def eval1(self, ast, level, state) -> str:
         if type(ast) == Symbol:
-            return self.lookup(ast)
+            return self.lookup(ast, state)
         elif type(ast) == list:
-            return list(map(lambda a: self.eval(a), ast))
+            return list(map(lambda a: self.eval(a, level, state), ast))
         else:
             return ast
 
     def indent(self, i):
         return " " * (2 * i + self.indentation)
 
-    def eval(self, ast, level=0) -> str:
+    def eval(self, ast, level=0, state=State()) -> str:
         if not type(ast) == list:
-            return self.eval1(ast)
+            return self.eval1(ast, level, state)
 
         if len(ast) == 0:
             return ast
 
         if (ast[0] == "documentclass!"):
-            section, args, result = ast[1], ast[2], self.eval(ast[3],
-                                                           level).strip()
-            if args:
-                a = ", ".join([_ for _ in args])
+            name, arglist, result = ast[1], ast[2], self.eval(
+                ast[3], level, state).strip()
+            if arglist:
+                a = ", ".join([_ for _ in arglist])
                 header = self.indent(
-                    level) + f"\\documentclass{{{section}}}[{a}]\n"
+                    level) + f"\\documentclass{{{name}}}[{a}]\n"
             else:
-                header = self.indent(level) + f"\\documentclass{{{section}}}\n"
+                header = self.indent(level) + f"\\documentclass{{{name}}}\n"
             body = self.indent(level) + f"{result}"
             return header + body
         elif ast[0] == "begin!":
-            section, result = ast[1], self.eval(ast[2], level + 1).strip()
-            header = self.indent(level) + f"\\begin{{{section}}}\n"
-            body = self.indent(level + 1) + f"{result}\n"
-            close = self.indent(level) + f"\\end{{{section}}}"
+            name, body = ast[1], self.eval(ast[2], level + 1, state).strip()
+            header = self.indent(level) + f"\\begin{{{name}}}\n"
+            body = self.indent(level + 1) + f"{body}\n"
+            close = self.indent(level) + f"\\end{{{name}}}"
             return header + body + close
+        elif ast[0] == "defvar":
+            var, decl = ast[1], self.eval(ast[2], level, state)
+            global_state.set(var, decl)
+            return ""
         elif ast[0] == "let":
+            let_bindings = State()
             varlist, body = ast[1], ast[2]
             for vardecl in varlist:
                 var, val = vardecl[0], vardecl[1]
-                self.bindings[var] = self.eval(val, level)
-            return self.eval(body, level)
+                let_bindings.set(var, self.eval(val, level, state))
+            return self.eval(body, level, let_bindings)
         elif ast[0] == "quote":
             return ast[1]
         else:
-            element = self.eval1(ast)
+            element = self.eval1(ast, level, state)
             function = element[0]
             return function(*element[1:])
 
@@ -161,6 +188,10 @@ class Parser:
     def skip(self) -> None:
         self.pointer += 1
 
+    def skip_checked(self, token) -> None:
+        assert self.peek() == token
+        self.pointer += 1
+
     def is_eof(self) -> bool:
         return self.pointer == len(self.data)
 
@@ -172,6 +203,21 @@ class Parser:
     def find_next_token_no_walk(self, token: str) -> int:
         ptr = self.pointer
         while (ptr < len(self.data) and self.data[ptr] != token):
+            ptr += 1
+        return ptr
+
+    def find_matching_parenthesis(self) -> int:
+        assert self.peek() == '('
+        self.skip()
+        ptr = self.pointer
+        st = 1
+        while (ptr < len(self.data)):
+            if self.data[ptr] == '(':
+                st += 1
+            elif self.data[ptr] == ')':
+                st -= 1
+            if st == 0:
+                break
             ptr += 1
         return ptr
 
@@ -204,12 +250,13 @@ class Parser:
             self.eprint(self.data[begin_ptr:self.pointer].rstrip())
             self.skip()    # skip '@'
             if (self.next_word() == "lisp"):
+                assert self.find_next_token('(')
                 lisp_code = LispParser(
-                    self.data[self.pointer:self.find_next_token_no_walk('\n')],
-                    self.find_indentation_level())
+                    self.data[self.pointer:self.find_matching_parenthesis() +
+                              1], self.find_indentation_level())
                 self.eprint(lisp_code.scaffold())
                 self.pointer += len(lisp_code.code)
-            begin_ptr = self.pointer + 1    # also skip '\n'
+            begin_ptr = self.pointer
         self.eprint(self.data[begin_ptr::].rstrip())
 
 
@@ -218,7 +265,6 @@ class Args:
         if (len(argv) < 2):
             print("Error: No arguments!", file=sys.stderr)
             self.help()
-
         self.outfile = sys.stdout
         modifiers = [f for f in argv[1::] if f.startswith('-')]
 
