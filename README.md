@@ -19,6 +19,8 @@ operator itself should give the desired output.
 The following snippet
 ```latex
 \documentclass[12pt]{article}
+\usepackage{amsmath}
+\usepackage{physics}
 \begin{document}
 The geometric series is
 @lisp
@@ -26,17 +28,21 @@ The geometric series is
 	(let ((lhs (plus 1 r (up r 2) (up r 3) (up r 4) \ldots ))
               (rhs (frac! 1 (minus 1 r))))
 	  (eq lhs (plus rhs))))
+for @lisp (abs! (< x 1)).
 \end{document}
 ```
 
 expands to
 ```latex
 \documentclass[12pt]{article}
+\usepackage{amsmath}
+\usepackage{physics}
 \begin{document}
 The geometric series is
 \begin{equation}
   1 + r + r^{2} + r^{3} + r^{4} + \ldots = \frac{1}{1 - r}
 \end{equation}
+for $\abs{x < 1}$.
 \end{document}
 ```
 
