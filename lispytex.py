@@ -39,11 +39,10 @@ class LispParser:
 
     pointer = 0
 
-    def __init__(self, code: str, indentation: int):
+    def __init__(self, code: str):
         self.code = code
         self.tokens = re.findall(TK_RE, code)
         self.back = self.tokens[self.pointer]
-        self.indentation = indentation
 
     def peek(self):
         return self.back
@@ -104,9 +103,9 @@ class LispParser:
         elif symbol == '_' or symbol == 'sub':
             return lambda a, b: f"{a}_{{{b}}}"
         elif symbol == '<' or symbol == 'lt':
-            return lambda a, b: f"{a} < {{{b}}}"
+            return lambda a, b: f"{a} < {b}"
         elif symbol == '>' or symbol == 'gt':
-            return lambda a, b: f"{a} > {{{b}}}"
+            return lambda a, b: f"{a} > {b}"
         elif symbol.endswith('!'):
             return lambda *a: f"\\{symbol.rstrip('!')}" + "".join(
                 [self.many_curlies(i) for i in a])
@@ -122,7 +121,7 @@ class LispParser:
             return ast
 
     def indent(self, i):
-        return " " * (2 * i + self.indentation)
+        return " " * (2 * i)
 
     def eval(self, ast, level=0, state=State()) -> str:
         if not type(ast) == list:
@@ -166,8 +165,12 @@ class LispParser:
             function = element[0]
             return function(*element[1:])
 
-    def scaffold(self):
-        return self.eval(self.parse())
+    def scaffold(self, inlined=False):
+        eval = self.eval(self.parse())
+        if(inlined):
+            return "$" + eval + "$"
+        else:
+            return eval
 
 
 class Parser:
@@ -221,16 +224,6 @@ class Parser:
             ptr += 1
         return ptr
 
-    def find_indentation_level(self) -> int:
-        ptr = self.pointer
-        while (ptr >= len(self.data) and self.data[ptr] != '\n'):
-            ptr -= 1
-        level = 0
-        while (ptr < len(self.data) and self.data[ptr] == ' '):
-            ptr += 1
-            level += 1
-        return level - 1
-
     def skip_ws(self) -> str:
         begin_of_ws = self.pointer
         while (not self.is_eof() and self.peek().isspace()):
@@ -247,17 +240,19 @@ class Parser:
     def parse_comments(self) -> None:
         begin_ptr = self.pointer
         while (self.find_next_token('@')):
-            self.eprint(self.data[begin_ptr:self.pointer].rstrip())
+            self.eprint(self.data[begin_ptr:self.pointer], end="")
+            inlined = self.data[self.pointer-1] != '\n'
             self.skip()    # skip '@'
             if (self.next_word() == "lisp"):
                 assert self.find_next_token('(')
+                ptr = self.pointer
                 lisp_code = LispParser(
                     self.data[self.pointer:self.find_matching_parenthesis() +
-                              1], self.find_indentation_level())
-                self.eprint(lisp_code.scaffold())
-                self.pointer += len(lisp_code.code)
+                              1])
+                self.eprint(lisp_code.scaffold(inlined=inlined), end="")
+                self.pointer = ptr + len(lisp_code.code)
             begin_ptr = self.pointer
-        self.eprint(self.data[begin_ptr::].rstrip())
+        self.eprint(self.data[begin_ptr::], end="")
 
 
 class Args:
