@@ -1,6 +1,7 @@
 import sys
 import os
 import re
+from collections import defaultdict
 
 TK_RE = re.compile(
     r"""[\s,]*(~@|[\[\]{}()'`~^@]|"(?:[\\].|[^\\"])*"?|;.*|[^\s\[\]{}()'"`@,;]+)"""
@@ -23,6 +24,7 @@ class LispParser:
         self.tokens = re.findall(TK_RE, code)
         self.back = self.tokens[self.pointer]
         self.indentation = indentation
+        self.bindings = defaultdict(str)
 
     def peek(self):
         return self.back
@@ -61,16 +63,33 @@ class LispParser:
         return f"{{{a}}}"
 
     def lookup(self, symbol):
-        if symbol == '+': return lambda a, b: f"{a} + {b}"
-        if symbol == '-': return lambda a, b: f"{a} - {b}"
-        if symbol == '*': return lambda a, b: f"{a} * {b}"
-        if symbol == '/': return lambda a, b: f"{a} / {b}"
-        if symbol == '=': return lambda a, b: f"{a} = {b}"
-        if symbol == '^': return lambda a, b: f"{a}^{{{b}}}"
-        if symbol.endswith('!'):
+        if symbol in self.bindings.keys():
+            return self.bindings[symbol]
+        elif symbol == '+' or symbol == 'plus':
+            return lambda a, b: f"{a} + {b}"
+        elif symbol == '-' or symbol == 'minus':
+            return lambda a, b: f"{a} - {b}"
+        elif symbol == '*' or symbol == 'times':
+            return lambda a, b: f"{a} * {b}"
+        elif symbol == '/' or symbol == 'div':
+            return lambda a, b: f"{a} / {b}"
+        elif symbol == '=' or symbol == 'eq':
+            return lambda a, b: f"{a} = {b}"
+        elif symbol == '%' or symbol == 'mod':
+            return lambda a, b: f"{a} % {b}"
+        elif symbol == '^' or symbol == 'up':
+            return lambda a, b: f"{a}^{{{b}}}"
+        elif symbol == '_' or symbol == 'sub':
+            return lambda a, b: f"{a}_{{{b}}}"
+        elif symbol == '<' or symbol == 'lt':
+            return lambda a, b: f"{a} < {{{b}}}"
+        elif symbol == '>' or symbol == 'gt':
+            return lambda a, b: f"{a} > {{{b}}}"
+        elif symbol.endswith('!'):
             return lambda *a: f"\\{symbol.rstrip('!')}" + "".join(
                 [self.many_curlies(i) for i in a])
-        return symbol
+        else:
+            return symbol
 
     def eval1(self, ast) -> str:
         if type(ast) == Symbol:
@@ -91,7 +110,7 @@ class LispParser:
             return ast
 
         if (ast[0] == "documentclass!"):
-            section, args, res = ast[1], ast[2], self.eval(ast[3],
+            section, args, result = ast[1], ast[2], self.eval(ast[3],
                                                            level).strip()
             if args:
                 a = ", ".join([_ for _ in args])
@@ -99,14 +118,20 @@ class LispParser:
                     level) + f"\\documentclass{{{section}}}[{a}]\n"
             else:
                 header = self.indent(level) + f"\\documentclass{{{section}}}\n"
-            body = self.indent(level) + f"{res}"
+            body = self.indent(level) + f"{result}"
             return header + body
         elif ast[0] == "begin!":
-            section, res = ast[1], self.eval(ast[2], level + 1).strip()
+            section, result = ast[1], self.eval(ast[2], level + 1).strip()
             header = self.indent(level) + f"\\begin{{{section}}}\n"
-            body = self.indent(level + 1) + f"{res}\n"
+            body = self.indent(level + 1) + f"{result}\n"
             close = self.indent(level) + f"\\end{{{section}}}"
             return header + body + close
+        elif ast[0] == "let":
+            varlist, body = ast[1], ast[2]
+            for vardecl in varlist:
+                var, val = vardecl[0], vardecl[1]
+                self.bindings[var] = self.eval(val, level)
+            return self.eval(body, level)
         elif ast[0] == "quote":
             return ast[1]
         else:
@@ -115,7 +140,7 @@ class LispParser:
             return function(*element[1:])
 
     def scaffold(self):
-        print(self.eval(self.parse()))
+        return self.eval(self.parse())
 
 
 class Parser:
@@ -176,16 +201,16 @@ class Parser:
     def parse_comments(self) -> None:
         begin_ptr = self.pointer
         while (self.find_next_token('@')):
-            print(self.data[begin_ptr:self.pointer].rstrip())
+            self.eprint(self.data[begin_ptr:self.pointer].rstrip())
             self.skip()    # skip '@'
             if (self.next_word() == "lisp"):
                 lisp_code = LispParser(
                     self.data[self.pointer:self.find_next_token_no_walk('\n')],
                     self.find_indentation_level())
-                lisp_code.scaffold()
+                self.eprint(lisp_code.scaffold())
                 self.pointer += len(lisp_code.code)
             begin_ptr = self.pointer + 1    # also skip '\n'
-        print(self.data[begin_ptr::].rstrip())
+        self.eprint(self.data[begin_ptr::].rstrip())
 
 
 class Args:
