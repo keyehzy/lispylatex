@@ -302,7 +302,7 @@ class Args:
         return self.file.read()
 
     def help(self):
-        print("Lispy Latex: Expands lisp snippets to latex", file=sys.stderr)
+        print("Lispy LaTeX: Expands lisp snippets to LaTeX", file=sys.stderr)
         print("Usage: python lispytex [FILE]", file=sys.stderr)
         print("Options:", file=sys.stderr)
         print("-f [FILE]" + 10 * " " + "Input to program", file=sys.stderr)
