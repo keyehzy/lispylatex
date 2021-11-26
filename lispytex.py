@@ -131,7 +131,7 @@ class LispParser:
             return ast
 
         if (ast[0] == "documentclass!"):
-            name, arglist, result = ast[1], ast[2], self.eval(
+            name, arglist, body = ast[1], ast[2], self.eval(
                 ast[3], level, state).strip()
             if arglist:
                 a = ", ".join([_ for _ in arglist])
@@ -139,7 +139,7 @@ class LispParser:
                     level) + f"\\documentclass{{{name}}}[{a}]\n"
             else:
                 header = self.indent(level) + f"\\documentclass{{{name}}}\n"
-            body = self.indent(level) + f"{result}"
+            body = self.indent(level) + f"{body}"
             return header + body
         elif ast[0] == "begin!":
             name, body = ast[1], self.eval(ast[2], level + 1, state).strip()
@@ -150,6 +150,17 @@ class LispParser:
         elif ast[0] == "defvar":
             var, decl = ast[1], self.eval(ast[2], level, state)
             global_state.set(var, decl)
+            return ""
+        elif ast[0] == "defun":
+            name, arglist, body = ast[1], ast[2], ast[3]
+
+            def f(*args):
+                env = State()
+                for arg, val in zip(arglist, args):
+                    env.set(arg, val)
+                return self.eval(body, level, env)
+
+            global_state.set(name, f)
             return ""
         elif ast[0] == "let":
             let_bindings = State()
@@ -165,9 +176,9 @@ class LispParser:
             function = element[0]
             return function(*element[1:])
 
-    def scaffold(self, inlined=False):
+    def value(self, inlined=False):
         eval = self.eval(self.parse())
-        if(inlined):
+        if (inlined):
             return "$" + eval + "$"
         else:
             return eval
@@ -180,7 +191,7 @@ class Parser:
         self.stream = stream
 
     def eprint(self, *args, **kwargs):
-        print(*args, **kwargs, file=self.stream)
+        print(*args, **kwargs, file=self.stream, end="")
 
     def __str__(self):
         return self.data[self.pointer::]
@@ -239,20 +250,24 @@ class Parser:
 
     def parse_comments(self) -> None:
         begin_ptr = self.pointer
-        while (self.find_next_token('@')):
-            self.eprint(self.data[begin_ptr:self.pointer], end="")
-            inlined = self.data[self.pointer-1] != '\n'
+        while self.find_next_token('@'):
+            self.eprint(self.data[begin_ptr:self.pointer])
+            inlined = self.data[self.pointer - 1] != '\n'
             self.skip()    # skip '@'
-            if (self.next_word() == "lisp"):
+            if self.next_word() == "lisp":
                 assert self.find_next_token('(')
                 ptr = self.pointer
-                lisp_code = LispParser(
+                parser = LispParser(
                     self.data[self.pointer:self.find_matching_parenthesis() +
                               1])
-                self.eprint(lisp_code.scaffold(inlined=inlined), end="")
-                self.pointer = ptr + len(lisp_code.code)
+                value = parser.value(inlined=inlined)
+                if value:
+                    self.eprint(value)
+                else:
+                    ptr += 1
+                self.pointer = ptr + len(parser.code)
             begin_ptr = self.pointer
-        self.eprint(self.data[begin_ptr::], end="")
+        self.eprint(self.data[begin_ptr::])
 
 
 class Args:
